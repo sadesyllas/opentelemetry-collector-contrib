@@ -6,6 +6,7 @@ package tailsamplingprocessor // import "github.com/open-telemetry/opentelemetry
 import (
 	"context"
 	"fmt"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
 	"math"
 	"runtime"
 	"sync"
@@ -63,6 +64,9 @@ type tailSamplingSpanProcessor struct {
 
 	setPolicyMux  sync.Mutex
 	pendingPolicy []PolicyCfg
+
+	spanSizeMetricsPerService bool
+	protoMarshaller           ptrace.ProtoMarshaler
 }
 
 // spanAndScope a structure for holding information about span and its instrumentation scope.
@@ -123,6 +127,7 @@ func newTracesProcessor(ctx context.Context, set processor.Settings, nextConsume
 		deleteChan:        make(chan pcommon.TraceID, cfg.NumTraces),
 	}
 	tsp.policyTicker = &timeutils.PolicyTicker{OnTickFunc: tsp.samplingPolicyOnTick}
+	tsp.spanSizeMetricsPerService = cfg.SpanSizeMetricsPerService
 
 	for _, opt := range opts {
 		opt(tsp)
@@ -580,6 +585,7 @@ func (tsp *tailSamplingSpanProcessor) dropTrace(traceID pcommon.TraceID, deletio
 // additionally adds the trace ID to the cache of sampled trace IDs. If the
 // trace ID is cached, it deletes the spans from the internal map.
 func (tsp *tailSamplingSpanProcessor) releaseSampledTrace(ctx context.Context, id pcommon.TraceID, td ptrace.Traces) {
+	tsp.produceSpanSizeMetricsPerService(ctx, td)
 	tsp.sampledIDCache.Put(id, true)
 	if err := tsp.nextConsumer.ConsumeTraces(ctx, td); err != nil {
 		tsp.logger.Warn(
@@ -589,6 +595,25 @@ func (tsp *tailSamplingSpanProcessor) releaseSampledTrace(ctx context.Context, i
 	_, ok := tsp.sampledIDCache.Get(id)
 	if ok {
 		tsp.dropTrace(id, time.Now())
+	}
+}
+
+func (tsp *tailSamplingSpanProcessor) produceSpanSizeMetricsPerService(ctx context.Context, td ptrace.Traces) {
+	if !tsp.spanSizeMetricsPerService {
+		return
+	}
+	marshalledBytes, err := tsp.protoMarshaller.MarshalTraces(td)
+	if err == nil {
+		resourceSpans := td.ResourceSpans()
+		if resourceSpans.Len() > 0 {
+			serviceName, found := resourceSpans.At(0).Resource().Attributes().Get(string(semconv.ServiceNameKey))
+			if found {
+				telemetry.SampledSpanSizePerService.Add(ctx, int64(len(marshalledBytes)),
+					metric.WithAttributes(semconv.ServiceNameKey.String(serviceName.AsString())))
+				//telemetry.SampledSpanSizePerServiceHistogram.Record(ctx, int64(len(marshalledBytes)),
+				//	metric.WithAttributes(semconv.ServiceNameKey.String(serviceName.AsString())))
+			}
+		}
 	}
 }
 

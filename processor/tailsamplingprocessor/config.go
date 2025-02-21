@@ -253,4 +253,6 @@ type Config struct {
 	PolicyCfgs []PolicyCfg `mapstructure:"policies"`
 	// DecisionCache holds configuration for the decision cache(s)
 	DecisionCache DecisionCacheConfig `mapstructure:"decision_cache"`
+	// If true, produce metrics for span sizes per service
+	SpanSizeMetricsPerService bool `mapstructure:"span_size_metrics_per_service"`
 }

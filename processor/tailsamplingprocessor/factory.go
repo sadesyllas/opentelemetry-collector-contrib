@@ -7,6 +7,7 @@ package tailsamplingprocessor // import "github.com/open-telemetry/opentelemetry
 
 import (
 	"context"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/processor/tailsamplingprocessor/internal/telemetry"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -38,5 +39,9 @@ func createTracesProcessor(
 	nextConsumer consumer.Traces,
 ) (processor.Traces, error) {
 	tCfg := cfg.(*Config)
+	err := telemetry.ConfigureKaizenMetrics(&params.TelemetrySettings)
+	if err != nil {
+		return nil, err
+	}
 	return newTracesProcessor(ctx, params, nextConsumer, *tCfg)
 }
