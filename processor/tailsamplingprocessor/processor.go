@@ -609,7 +609,7 @@ func (tsp *tailSamplingSpanProcessor) produceSpanSizeMetricsPerService(ctx conte
 			serviceName, found := resourceSpans.At(0).Resource().Attributes().Get(string(semconv.ServiceNameKey))
 			if found {
 				telemetry.SampledSpanSizePerService.Add(ctx, int64(len(marshalledBytes)),
-					metric.WithAttributes(semconv.ServiceNameKey.String(serviceName.AsString())))
+					metric.WithAttributes(attribute.String("service_name", serviceName.AsString())))
 				//telemetry.SampledSpanSizePerServiceHistogram.Record(ctx, int64(len(marshalledBytes)),
 				//	metric.WithAttributes(semconv.ServiceNameKey.String(serviceName.AsString())))
 			}
