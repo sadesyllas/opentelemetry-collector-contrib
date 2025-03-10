@@ -5,23 +5,23 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-//var SampledSpanSizePerService metric.Int64Counter
+var SampledSpanSizePerService metric.Int64Counter
 
-var SampledSpanSizePerService metric.Int64Histogram
+//var SampledSpanSizePerService metric.Int64Histogram
 
 func ConfigureKaizenMetrics(telemetry *component.TelemetrySettings) error {
 	meter := telemetry.MeterProvider.Meter("tailsamplingprocessorkaizenmetrics")
 
 	var err error
 
-	//SampledSpanSizePerService, err = meter.Int64Counter("otelcol_processor_tail_sampling_sampled_spans_size",
-	//	metric.WithDescription("The size of sampled spans in bytes per service"),
-	//	metric.WithUnit("{bytes}"))
-
-	SampledSpanSizePerService, err = meter.Int64Histogram("otelcol_processor_tail_sampling_sampled_spans_size",
+	SampledSpanSizePerService, err = meter.Int64Counter("otelcol_processor_tail_sampling_sampled_spans_size",
 		metric.WithDescription("The size of sampled spans in bytes per service"),
-		metric.WithUnit("{bytes}"),
-		metric.WithExplicitBucketBoundaries(0))
+		metric.WithUnit("{bytes}"))
+
+	//SampledSpanSizePerService, err = meter.Int64Histogram("otelcol_processor_tail_sampling_sampled_spans_size",
+	//	metric.WithDescription("The size of sampled spans in bytes per service"),
+	//	metric.WithUnit("{bytes}"),
+	//	metric.WithExplicitBucketBoundaries(0))
 
 	if err != nil {
 		return err
