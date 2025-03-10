@@ -39,7 +39,7 @@ func createTracesProcessor(
 	nextConsumer consumer.Traces,
 ) (processor.Traces, error) {
 	tCfg := cfg.(*Config)
-	err := telemetry.ConfigureKaizenMetrics(&params.TelemetrySettings)
+	err := telemetry.ConfigureCustomMetrics(&params.TelemetrySettings)
 	if err != nil {
 		return nil, err
 	}

@@ -7,21 +7,14 @@ import (
 
 var SampledSpanSizePerService metric.Int64Counter
 
-//var SampledSpanSizePerService metric.Int64Histogram
-
-func ConfigureKaizenMetrics(telemetry *component.TelemetrySettings) error {
-	meter := telemetry.MeterProvider.Meter("tailsamplingprocessorkaizenmetrics")
+func ConfigureCustomMetrics(telemetry *component.TelemetrySettings) error {
+	meter := telemetry.MeterProvider.Meter("tailsamplingprocessorcustommetrics")
 
 	var err error
 
 	SampledSpanSizePerService, err = meter.Int64Counter("otelcol_processor_tail_sampling_sampled_spans_size",
 		metric.WithDescription("The size of sampled spans in bytes per service"),
 		metric.WithUnit("{bytes}"))
-
-	//SampledSpanSizePerService, err = meter.Int64Histogram("otelcol_processor_tail_sampling_sampled_spans_size",
-	//	metric.WithDescription("The size of sampled spans in bytes per service"),
-	//	metric.WithUnit("{bytes}"),
-	//	metric.WithExplicitBucketBoundaries(0))
 
 	if err != nil {
 		return err
