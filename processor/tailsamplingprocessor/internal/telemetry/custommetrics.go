@@ -6,6 +6,7 @@ import (
 )
 
 var SampledSpanSizePerService metric.Int64Counter
+var MissingAttributesPerService metric.Int64Gauge
 
 func ConfigureCustomMetrics(telemetry *component.TelemetrySettings) error {
 	meter := telemetry.MeterProvider.Meter("tailsamplingprocessorcustommetrics")
@@ -19,6 +20,10 @@ func ConfigureCustomMetrics(telemetry *component.TelemetrySettings) error {
 	if err != nil {
 		return err
 	}
+
+	MissingAttributesPerService, err = meter.Int64Gauge("otelcol_processor_tail_sampling_missing_resource_attributes",
+		metric.WithDescription("Missing resource attributes per service"),
+		metric.WithUnit("1"))
 
 	return nil
 }

@@ -65,8 +65,10 @@ type tailSamplingSpanProcessor struct {
 	setPolicyMux  sync.Mutex
 	pendingPolicy []PolicyCfg
 
-	spanSizeMetricsPerService bool
-	protoMarshaller           ptrace.ProtoMarshaler
+	protoMarshaller ptrace.ProtoMarshaler
+
+	spanSizeMetricsPerService         bool
+	measuredMissingResourceAttributes []string
 }
 
 // spanAndScope a structure for holding information about span and its instrumentation scope.
@@ -127,7 +129,13 @@ func newTracesProcessor(ctx context.Context, set processor.Settings, nextConsume
 		deleteChan:        make(chan pcommon.TraceID, cfg.NumTraces),
 	}
 	tsp.policyTicker = &timeutils.PolicyTicker{OnTickFunc: tsp.samplingPolicyOnTick}
+
 	tsp.spanSizeMetricsPerService = cfg.SpanSizeMetricsPerService
+
+	tsp.measuredMissingResourceAttributes = cfg.MeasuredMissingResourceAttributes
+	if tsp.measuredMissingResourceAttributes != nil && len(tsp.measuredMissingResourceAttributes) == 0 {
+		tsp.measuredMissingResourceAttributes = nil
+	}
 
 	for _, opt := range opts {
 		opt(tsp)
@@ -467,7 +475,7 @@ func (tsp *tailSamplingSpanProcessor) processTraces(resourceSpans ptrace.Resourc
 		if _, ok := tsp.sampledIDCache.Get(id); ok {
 			tsp.logger.Debug("Trace ID is in the sampled cache", zap.Stringer("id", id))
 			traceTd := ptrace.NewTraces()
-			appendToTraces(traceTd, resourceSpans, spans)
+			tsp.appendToTraces(traceTd, resourceSpans, spans)
 			tsp.releaseSampledTrace(tsp.ctx, id, traceTd)
 			metric.WithAttributeSet(attribute.NewSet())
 			tsp.telemetry.ProcessorTailSamplingEarlyReleasesFromCacheDecision.
@@ -522,7 +530,7 @@ func (tsp *tailSamplingSpanProcessor) processTraces(resourceSpans ptrace.Resourc
 
 		if finalDecision == sampling.Unspecified {
 			// If the final decision hasn't been made, add the new spans under the lock.
-			appendToTraces(actualData.ReceivedBatches, resourceSpans, spans)
+			tsp.appendToTraces(actualData.ReceivedBatches, resourceSpans, spans)
 			actualData.Unlock()
 			continue
 		}
@@ -532,7 +540,7 @@ func (tsp *tailSamplingSpanProcessor) processTraces(resourceSpans ptrace.Resourc
 		switch finalDecision {
 		case sampling.Sampled:
 			traceTd := ptrace.NewTraces()
-			appendToTraces(traceTd, resourceSpans, spans)
+			tsp.appendToTraces(traceTd, resourceSpans, spans)
 			tsp.releaseSampledTrace(tsp.ctx, id, traceTd)
 		case sampling.NotSampled:
 			tsp.releaseNotSampledTrace(id)
@@ -546,6 +554,8 @@ func (tsp *tailSamplingSpanProcessor) processTraces(resourceSpans ptrace.Resourc
 	}
 
 	tsp.telemetry.ProcessorTailSamplingNewTraceIDReceived.Add(tsp.ctx, newTraceIDs)
+
+	tsp.produceMissingAttributeMetrics(resourceSpans)
 }
 
 func (tsp *tailSamplingSpanProcessor) Capabilities() consumer.Capabilities {
@@ -598,6 +608,37 @@ func (tsp *tailSamplingSpanProcessor) releaseSampledTrace(ctx context.Context, i
 	}
 }
 
+// releaseNotSampledTrace adds the trace ID to the cache of not sampled trace
+// IDs. If the trace ID is cached, it deletes the spans from the internal map.
+func (tsp *tailSamplingSpanProcessor) releaseNotSampledTrace(id pcommon.TraceID) {
+	tsp.nonSampledIDCache.Put(id, true)
+	_, ok := tsp.nonSampledIDCache.Get(id)
+	if ok {
+		tsp.dropTrace(id, time.Now())
+	}
+}
+
+func (tsp *tailSamplingSpanProcessor) appendToTraces(dest ptrace.Traces, rss ptrace.ResourceSpans, spanAndScopes []spanAndScope) {
+	rs := dest.ResourceSpans().AppendEmpty()
+	rss.Resource().CopyTo(rs.Resource())
+
+	scopePointerToNewScope := make(map[*pcommon.InstrumentationScope]*ptrace.ScopeSpans)
+	for _, spanAndScope := range spanAndScopes {
+		// If the scope of the spanAndScope is not in the map, add it to the map and the destination.
+		if scope, ok := scopePointerToNewScope[spanAndScope.instrumentationScope]; !ok {
+			is := rs.ScopeSpans().AppendEmpty()
+			spanAndScope.instrumentationScope.CopyTo(is.Scope())
+			scopePointerToNewScope[spanAndScope.instrumentationScope] = &is
+
+			sp := is.Spans().AppendEmpty()
+			spanAndScope.span.CopyTo(sp)
+		} else {
+			sp := scope.Spans().AppendEmpty()
+			spanAndScope.span.CopyTo(sp)
+		}
+	}
+}
+
 func (tsp *tailSamplingSpanProcessor) produceSpanSizeMetricsPerService(ctx context.Context, td ptrace.Traces) {
 	if !tsp.spanSizeMetricsPerService {
 		return
@@ -615,33 +656,23 @@ func (tsp *tailSamplingSpanProcessor) produceSpanSizeMetricsPerService(ctx conte
 	}
 }
 
-// releaseNotSampledTrace adds the trace ID to the cache of not sampled trace
-// IDs. If the trace ID is cached, it deletes the spans from the internal map.
-func (tsp *tailSamplingSpanProcessor) releaseNotSampledTrace(id pcommon.TraceID) {
-	tsp.nonSampledIDCache.Put(id, true)
-	_, ok := tsp.nonSampledIDCache.Get(id)
-	if ok {
-		tsp.dropTrace(id, time.Now())
+func (tsp *tailSamplingSpanProcessor) produceMissingAttributeMetrics(rss ptrace.ResourceSpans) {
+	if tsp.measuredMissingResourceAttributes == nil {
+		return
 	}
-}
 
-func appendToTraces(dest ptrace.Traces, rss ptrace.ResourceSpans, spanAndScopes []spanAndScope) {
-	rs := dest.ResourceSpans().AppendEmpty()
-	rss.Resource().CopyTo(rs.Resource())
+	serviceName, serviceNameFound := rss.Resource().Attributes().Get(string(semconv.ServiceNameKey))
+	if !serviceNameFound {
+		return
+	}
 
-	scopePointerToNewScope := make(map[*pcommon.InstrumentationScope]*ptrace.ScopeSpans)
-	for _, spanAndScope := range spanAndScopes {
-		// If the scope of the spanAndScope is not in the map, add it to the map and the destination.
-		if scope, ok := scopePointerToNewScope[spanAndScope.instrumentationScope]; !ok {
-			is := rs.ScopeSpans().AppendEmpty()
-			spanAndScope.instrumentationScope.CopyTo(is.Scope())
-			scopePointerToNewScope[spanAndScope.instrumentationScope] = &is
-
-			sp := is.Spans().AppendEmpty()
-			spanAndScope.span.CopyTo(sp)
-		} else {
-			sp := scope.Spans().AppendEmpty()
-			spanAndScope.span.CopyTo(sp)
+	attrs := rss.Resource().Attributes()
+	for _, v := range tsp.measuredMissingResourceAttributes {
+		if _, found := attrs.Get(v); !found {
+			telemetry.MissingAttributesPerService.Record(context.Background(), 1,
+				metric.WithAttributes(
+					attribute.String("service_name", serviceName.AsString()),
+					attribute.String("missing", v)))
 		}
 	}
 }

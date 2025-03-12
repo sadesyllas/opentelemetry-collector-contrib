@@ -254,5 +254,6 @@ type Config struct {
 	// DecisionCache holds configuration for the decision cache(s)
 	DecisionCache DecisionCacheConfig `mapstructure:"decision_cache"`
 	// If true, produce metrics for span sizes per service
-	SpanSizeMetricsPerService bool `mapstructure:"span_size_metrics_per_service"`
+	SpanSizeMetricsPerService         bool     `mapstructure:"span_size_metrics_per_service"`
+	MeasuredMissingResourceAttributes []string `mapstructure:"measured_missing_resource_attributes"`
 }
