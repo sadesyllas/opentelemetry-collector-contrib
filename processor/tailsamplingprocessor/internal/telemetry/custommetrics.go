@@ -5,7 +5,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-var SampledSpanSizePerService metric.Int64Counter
+var SampledSpanSizePerService metric.Int64Histogram
 var MissingAttributesPerService metric.Int64Gauge
 
 func ConfigureCustomMetrics(telemetry *component.TelemetrySettings) error {
@@ -13,9 +13,10 @@ func ConfigureCustomMetrics(telemetry *component.TelemetrySettings) error {
 
 	var err error
 
-	SampledSpanSizePerService, err = meter.Int64Counter("otelcol_processor_tail_sampling_sampled_spans_size",
+	SampledSpanSizePerService, err = meter.Int64Histogram("otelcol_processor_tail_sampling_sampled_spans_size",
 		metric.WithDescription("The size of sampled spans in bytes per service"),
-		metric.WithUnit("{bytes}"))
+		metric.WithUnit("{bytes}"),
+		metric.WithExplicitBucketBoundaries(0))
 
 	if err != nil {
 		return err
